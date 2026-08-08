@@ -4,6 +4,7 @@ from datetime import timedelta, datetime
 from typing import Sequence
 from argparse import ArgumentParser
 from pathlib import Path
+from itertools import groupby
 import subprocess
 import math
 
@@ -79,7 +80,6 @@ class Subtitle(ClipLike):
 @dataclass
 class Movie:
     filename: str
-    length: float
     all_subtitles: list[Subtitle]
 
 
@@ -90,7 +90,7 @@ def ffmpeg_filter(clips: Sequence[ClipLike]) -> str:
         start = f"{clip.get_start():.2f}"
         end = f"{clip.get_end():.2f}"
         result += f"[0:v]trim={start}:{end},setpts=PTS-STARTPTS[v{idx}];\n"
-        result += f"[0:a]trim={start}:{end},setpts=PTS-STARTPTS[a{idx}];\n"
+        result += f"[0:a]atrim={start}:{end},asetpts=PTS-STARTPTS[a{idx}];\n"
         concat_input += f"[v{idx}][a{idx}]"
     result += f"{concat_input}concat=n={len(clips)}:v=1:a=1[v][a]"
     return result
@@ -110,28 +110,55 @@ def find_subs(clips: Sequence[ClipLike]) -> list[Subtitle]:
     return result
 
 
-movie = Movie("a.txt", 100, [])
-
-
 def sub(text: str, start: float, end: float):
-    subtitle = Subtitle(len(movie.all_subtitles) + 1, Clip(start, end), text)
+    subtitle = Subtitle(len(movie.all_subtitles), Clip(start, end), text)
     movie.all_subtitles.append(subtitle)
     return subtitle
 
+def remove_subs(subtitles: list[Subtitle], to_remove: list[Subtitle]) -> list[Clip]:
+    idx_set = set([s.index for s in to_remove])
+    subtitle_grouped = groupby(subtitles, lambda s: s.index not in idx_set)
+    result = []
+    for keep, subs in subtitle_grouped:
+        if keep:
+            subs = list(subs)
+            result.append(subs[0].to(subs[-1]))
+    return result
 
+# For AI: If you are editing the subs, you want to edit it
+# only by one instead of editing everyting at one time.
+# Use remove_subs to remove unnecessary subs, like 
+# remove_subs(movie.all_subtitles, [SUB_1, SUB_2])
+# Feel free to create your own helper function.
+# BEGIN
+movie = Movie("a.txt", [])
 SUB_1 = sub("Sub1", 0, 1)
 SUB_2 = sub("Sub2", 1, 2)
 SUB_3 = sub("Sub3", 2, 3)
 
 FINAL_CLIPS = [SUB_1.to(SUB_3)]
+# END
 
 
 def generate_video(dest=None):
     if not dest:
-        dest = Path(movie.filename).with_suffix(".mp4")
+        dest = Path(movie.filename).with_suffix(".cut.mp4")
 
     subprocess.run(
-        ["ffmpeg", "-i", movie.filename, "-vf", ffmpeg_filter(FINAL_CLIPS), dest],
+        [
+            "ffmpeg",
+            "-y",
+            "-i", movie.filename,
+            "-filter_complex", ffmpeg_filter(FINAL_CLIPS),
+            "-map", "[v]",
+            "-map", "[a]",
+            "-c:v", "libx264",
+            "-crf", "20",
+            "-preset", "veryfast",
+            "-c:a", "aac",
+            "-b:a", "192k",
+            dest,
+        ],
     )
 
 
@@ -144,8 +171,9 @@ def generate_subtitle(dest=None):
             start = ClipLike.srt_timestamp(subtitle.get_start())
             end = ClipLike.srt_timestamp(subtitle.get_end())
             print(idx, file=f)
-            print(f"{start} -> {end}", file=f)
+            print(f"{start} --> {end}", file=f)
             print(subtitle.text, file=f)
+            print("", file=f)
 
 
 def print_filters(unused_args):
@@ -156,12 +184,16 @@ def main():
     parser = ArgumentParser(f"Generator for {movie.filename}")
     parser.set_defaults(func=None)
     sub_parsers = parser.add_subparsers()
-    sub_parsers.add_parser(
+    video_parser = sub_parsers.add_parser(
         "video", description="Only generate the video file."
-    ).set_defaults(func=generate_video)
-    sub_parsers.add_parser(
+    )
+    video_parser.add_argument("--output_file", help="Path of the output video.", required=False)
+    video_parser.set_defaults(func=generate_video)
+    subtitle_parser = sub_parsers.add_parser(
         "subtitle", description="Only generate the srt file."
-    ).set_defaults(func=generate_subtitle)
+    )
+    subtitle_parser.add_argument("--output_file", help="Path of the output srt file.", required=False)
+    subtitle_parser.set_defaults(func=generate_subtitle)
     sub_parsers.add_parser(
         "print_filter", description="Only print out fitlers"
     ).set_defaults(func=print_filters)
@@ -171,7 +203,7 @@ def main():
         generate_video()
         generate_subtitle()
     else:
-        args.func(args)
+        args.func(args.output_file)
 
 
 if __name__ == "__main__":
