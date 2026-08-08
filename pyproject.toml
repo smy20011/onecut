@@ -1,7 +1,7 @@
 [project]
 name = "onecut"
 version = "0.1.0"
-description = "Add your description here"
+description = "One cut - Edit your video by editing code."
 readme = "README.md"
 authors = [
     { name = "Siyuan Ma", email = "smy20011@gmail.com" }

@@ -115,6 +115,7 @@ def sub(text: str, start: float, end: float):
     movie.all_subtitles.append(subtitle)
     return subtitle
 
+
 def remove_subs(subtitles: list[Subtitle], to_remove: list[Subtitle]) -> list[Clip]:
     idx_set = set([s.index for s in to_remove])
     subtitle_grouped = groupby(subtitles, lambda s: s.index not in idx_set)
@@ -125,9 +126,10 @@ def remove_subs(subtitles: list[Subtitle], to_remove: list[Subtitle]) -> list[Cl
             result.append(subs[0].to(subs[-1]))
     return result
 
+
 # For AI: If you are editing the subs, you want to edit it
 # only by one instead of editing everyting at one time.
-# Use remove_subs to remove unnecessary subs, like 
+# Use remove_subs to remove unnecessary subs, like
 # remove_subs(movie.all_subtitles, [SUB_1, SUB_2])
 # Feel free to create your own helper function.
 
@@ -149,15 +151,24 @@ def generate_video(dest=None):
         [
             "ffmpeg",
             "-y",
-            "-i", movie.filename,
-            "-filter_complex", ffmpeg_filter(FINAL_CLIPS),
-            "-map", "[v]",
-            "-map", "[a]",
-            "-c:v", "libx264",
-            "-crf", "20",
-            "-preset", "veryfast",
-            "-c:a", "aac",
-            "-b:a", "192k",
+            "-i",
+            movie.filename,
+            "-filter_complex",
+            ffmpeg_filter(FINAL_CLIPS),
+            "-map",
+            "[v]",
+            "-map",
+            "[a]",
+            "-c:v",
+            "libx264",
+            "-crf",
+            "20",
+            "-preset",
+            "veryfast",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "192k",
             dest,
         ],
     )
@@ -188,12 +199,16 @@ def main():
     video_parser = sub_parsers.add_parser(
         "video", description="Only generate the video file."
     )
-    video_parser.add_argument("--output_file", help="Path of the output video.", required=False)
+    video_parser.add_argument(
+        "--output_file", help="Path of the output video.", required=False
+    )
     video_parser.set_defaults(func=generate_video)
     subtitle_parser = sub_parsers.add_parser(
         "subtitle", description="Only generate the srt file."
     )
-    subtitle_parser.add_argument("--output_file", help="Path of the output srt file.", required=False)
+    subtitle_parser.add_argument(
+        "--output_file", help="Path of the output srt file.", required=False
+    )
     subtitle_parser.set_defaults(func=generate_subtitle)
     sub_parsers.add_parser(
         "print_filter", description="Only print out fitlers"
@@ -204,7 +219,7 @@ def main():
         generate_video()
         generate_subtitle()
     else:
-        args.func(getattr(args, "output_file"))
+        args.func(getattr(args, "output_file", ""))
 
 
 if __name__ == "__main__":

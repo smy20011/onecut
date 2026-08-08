@@ -8,16 +8,21 @@ import argparse
 def transcribe(
     file, model_size="small", device="cpu", compute_type="int8"
 ) -> list[Segment]:
-    model_size = "small"
-    model = WhisperModel(model_size, device="cpu", compute_type="int8")
-    segments, info = model.transcribe(file, beam_size=5, vad_filter=True)
+    model = WhisperModel(model_size, device=device, compute_type=compute_type)
+    segments, info = model.transcribe(
+        file,
+        beam_size=5,
+        word_timestamps=True,
+    )
     return list(segments)
 
 
 def codegen(filename: str, segments: list[Segment]):
     code = f"movie = Movie({repr(filename)}, [])\n"
     for idx, segment in enumerate(segments):
-        code += f"SUB_{idx + 1} = sub({repr(segment.text)}, {segment.start}, {segment.end})\n"
+        assert segment.words
+        words = segment.words
+        code += f"SUB_{idx + 1} = sub({repr(segment.text.strip())}, {words[0].start}, {words[-1].end})\n"
     code += f"FINAL_CLIPS = [SUB_{1}.to(SUB_{len(segments)})]\n"
     return code
 

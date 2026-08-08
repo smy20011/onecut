@@ -32,6 +32,7 @@ def test_subtitle_to():
 def test_format_srt():
     assert ClipLike.srt_timestamp(3600 + 23 * 60 + 45 + 0.678) == "01:23:45,678"
 
+
 def test_remove_subs():
     assert remove_subs(movie.all_subtitles, [SUB_2]) == [Clip(0, 1), Clip(2, 3)]
     assert remove_subs(movie.all_subtitles, [SUB_1]) == [Clip(1, 3)]
