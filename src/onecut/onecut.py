@@ -10,7 +10,7 @@ def transcribe(
 ) -> list[Segment]:
     model_size = "small"
     model = WhisperModel(model_size, device="cpu", compute_type="int8")
-    segments, info = model.transcribe(file, beam_size=5)
+    segments, info = model.transcribe(file, beam_size=5, vad_filter=True)
     return list(segments)
 
 
@@ -31,7 +31,7 @@ def main():
     segments = transcribe(opt.filename)
     example = open(Path(__file__).parent / "example.py").read()
     code = re.sub(
-        "#BEGIN.*#END", codegen(opt.filename, segments), example, flags=re.DOTALL
+        "# BEGIN.*# END", codegen(opt.filename, segments), example, flags=re.DOTALL
     )
 
     with open(opt.output, "w") as f:

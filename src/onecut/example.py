@@ -130,6 +130,7 @@ def remove_subs(subtitles: list[Subtitle], to_remove: list[Subtitle]) -> list[Cl
 # Use remove_subs to remove unnecessary subs, like 
 # remove_subs(movie.all_subtitles, [SUB_1, SUB_2])
 # Feel free to create your own helper function.
+
 # BEGIN
 movie = Movie("a.txt", [])
 SUB_1 = sub("Sub1", 0, 1)
@@ -203,7 +204,7 @@ def main():
         generate_video()
         generate_subtitle()
     else:
-        args.func(args.output_file)
+        args.func(getattr(args, "output_file"))
 
 
 if __name__ == "__main__":
