@@ -1,2 +1,4 @@
+from .onecut import main as cut_main
+
 def main() -> None:
-    print("Hello from onecut!")
+    cut_main()
