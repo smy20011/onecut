@@ -7,7 +7,7 @@ The code contains all the subtitles from ASR and allows you to modify the video 
 Run onecut to transcribe your video:
 
 ```bash
-uvx onecut path/to/your/video.mp4
+uvx onecut@latest path/to/your/video.mp4
 ```
 
 The OneCut CLI will generate code like this. You can easily fix ASR errors by changing the text.
