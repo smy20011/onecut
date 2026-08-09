@@ -29,18 +29,24 @@ def codegen(filename: str, segments: list[Segment]):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("filename", help="Input filename")
-    parser.add_argument("output", help="Output filename")
+    parser.add_argument("input", help="Input filename")
+    parser.add_argument("output", help="Output filename", nargs="?")
     opt = parser.parse_args()
 
-    segments = transcribe(opt.filename)
+    print(f"Transcribing file: {opt.input}")
+    segments = transcribe(opt.input)
     example = open(Path(__file__).parent / "example.py").read()
     code = re.sub(
-        "# BEGIN.*# END", codegen(opt.filename, segments), example, flags=re.DOTALL
+        "# BEGIN.*# END", codegen(opt.input, segments), example, flags=re.DOTALL
     )
 
-    with open(opt.output, "w") as f:
+    if opt.output:
+        output_file = opt.output
+    else:
+        output_file = Path(opt.input).with_suffix(".py")
+    with open(output_file, "w") as f:
         f.write(code)
+    print(f"Transcribed subtitles & generated code is written to {output_file}")
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 [project]
 name = "onecut"
-version = "0.2.0"
+version = "0.2.1"
 description = "One cut - Edit your video by editing code."
 readme = "README.md"
 authors = [
