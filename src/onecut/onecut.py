@@ -18,12 +18,15 @@ def transcribe(
 
 
 def codegen(filename: str, segments: list[Segment]):
-    code = f"movie = Movie({repr(filename)}, [])\n"
+    movie_len = max([s.end for s in segments], default=0.0)
+    code = f"    movie = Movie({repr(filename)}, {movie_len})\n"
+    code += "    return seq(\n"
     for idx, segment in enumerate(segments):
         assert segment.words
-        words = segment.words
-        code += f"SUB_{idx + 1} = sub({repr(segment.text.strip())}, {words[0].start}, {words[-1].end})\n"
-    code += f"FINAL_CLIPS = [SUB_{1}.to(SUB_{len(segments)})]\n"
+        start_time = segment.words[0].start
+        end_time = segment.words[-1].end
+        code += f"        movie.clip(start={start_time}, end={end_time}, subtitle={repr(segment.text.strip())})\n"
+    code += "    )\n"
     return code
 
 
@@ -35,7 +38,8 @@ def main():
 
     print(f"Transcribing file: {opt.input}")
     segments = transcribe(opt.input)
-    example = open(Path(__file__).parent / "example.py").read()
+    with open(Path(__file__).parent / "example.py", encoding="utf-8") as f:
+        example = f.read()
     code = re.sub(
         "# BEGIN.*# END", codegen(opt.input, segments), example, flags=re.DOTALL
     )
@@ -44,7 +48,7 @@ def main():
         output_file = opt.output
     else:
         output_file = Path(opt.input).with_suffix(".py")
-    with open(output_file, "w") as f:
+    with open(output_file, "w", encoding="utf-8") as f:
         f.write(code)
     print(f"Transcribed subtitles & generated code is written to {output_file}")
 
