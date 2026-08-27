@@ -1,4 +1,5 @@
 from abc import ABC, abstractclassmethod, abstractmethod
+from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import time, timedelta, datetime
 from typing import ClassVar, Sequence
@@ -26,6 +27,24 @@ class SubTitle:
     end: float
     text: str
 
+@dataclass(frozen=True)
+class FilterLabel:
+    filter_type: str
+    id: int
+
+    def __str__(self) -> str:
+        return f"{self.filter_type}{self.id}"
+
+@dataclass
+class Filter:
+    inputs: list[FilterLabel] = field(default_factory=list)
+    outputs: list[FilterLabel] = field(default_factory=list)
+    text: str = ""
+
+    def __str__(self) -> str:
+        inputs = "".join([f"[{l}]" for l in self.inputs])
+        outputs = "".join([f"[{l}]" for l in self.outputs])
+        return f"{inputs}{self.text}{outputs};"
 
 @dataclass
 class Clip(ABC):
@@ -49,20 +68,23 @@ class Clip(ABC):
 
     @property
     @abstractmethod
-    def filter(self) -> str:
+    def filters(self) -> list[Filter]:
         pass
 
     @property
-    def inputs(self) -> Sequence["Clip"]:
+    def v(self) -> FilterLabel:
+        return FilterLabel("v", self.id)
+
+    @property
+    def a(self) -> FilterLabel:
+        return FilterLabel("a", self.id)
+
+    @property
+    def deps(self) -> Sequence['Clip']:
         return []
 
-    @property
-    def v(self) -> str:
-        return f"v{self.id}"
-
-    @property
-    def a(self) -> str:
-        return f"a{self.id}"
+    def __hash__(self) -> int:
+        return hash(self.id)
 
 
 @dataclass
@@ -80,12 +102,11 @@ class Movie(Clip):
         return self._subtitles
 
     @property
-    def filter(self) -> str:
-        filter_str = f"""
-movie=filename={self.filename} [{self.v}];
-amovie=filename={self.filename} [{self.a}];
-""".strip()
-        return filter_str
+    def filters(self) -> list[Filter]:
+        return [
+            Filter([], [self.v], f"movie=filename={self.filename}"),
+            Filter([], [self.a], f"amovie=filename={self.filename}"),
+        ]
 
     def clip(
         self, start: float, end: float, subtitle: str | None = None
@@ -112,14 +133,14 @@ class MovieClip(Clip):
         return self._subtitles
 
     @property
-    def filter(self) -> str:
-        return f"""
-[{self.movie.v}]trim={self.start:.2f}:{self.end:.2f},setpts=PTS-STARTPTS[{self.v}];
-[{self.movie.a}]atrim={self.start:.2f}:{self.end:.2f},asetpts=PTS-STARTPTS[{self.a}];
-    """.strip()
+    def filters(self) -> list[Filter]:
+        return [
+            Filter([self.movie.v], [self.v], f"trim={self.start:.2f}:{self.end:.2f},setpts=PTS-STARTPTS"),
+            Filter([self.movie.a], [self.a], f"atrim={self.start:.2f}:{self.end:.2f},asetpts=PTS-STARTPTS")
+        ]
 
     @property
-    def inputs(self) -> Sequence[Clip]:
+    def deps(self) -> Sequence['Clip']:
         return [self.movie]
 
 
@@ -142,13 +163,16 @@ class Seq(Clip):
         return result
 
     @property
-    def filter(self) -> str:
-        inputs = "".join([f"[{c.v}][{c.a}]" for c in self.children])
-        return f"{inputs}concat=n={len(self.children)}:v=1:a=1[{self.v}][{self.a}];"
+    def filters(self) -> list[Filter]:
+        inputs = []
+        for c in self.children:
+            inputs.extend([c.v, c.a])
+        return [Filter(inputs, [self.v, self.a], f"concat=n={len(self.children)}:v=1:a=1")]
 
     @property
-    def inputs(self) -> Sequence["Clip"]:
+    def deps(self) -> Sequence['Clip']:
         return self.children
+
 
 
 def seq(*clips: Clip):
@@ -157,20 +181,43 @@ def seq(*clips: Clip):
 
 
 def ffmpeg_filter(clip: Clip) -> str:
-    visited = set()
-    filters = []
+    filters: list[Filter] = []
 
-    def dfs(clip: Clip):
+    visited = set()
+    def dfs_clips(clip: Clip):
         if clip.id in visited:
             return
-        for i in clip.inputs:
-            dfs(i)
-        filters.append(clip.filter)
+        for dep in clip.deps:
+            dfs_clips(dep)
+        filters.extend(clip.filters)
         visited.add(clip.id)
+    dfs_clips(clip)
 
-    dfs(clip)
-    return "\n".join(filters)
+    # We need to insert split node if a input label is
+    # used more than twice.
+    input_labels: dict[FilterLabel, list[Filter]] = defaultdict(list)
+    for f in filters:
+        for l in f.inputs:
+            input_labels[l].append(f)
 
+    result = []
+    for f in filters:
+        result.append(f)
+        for l in f.outputs:
+            n = len(input_labels[l])
+            if n > 1:
+                outputs = [
+                    FilterLabel(f"split{idx}_{l.filter_type}", l.id)
+                    for idx in range(n)
+                ]
+                text = "split" if l.filter_type == "v" else "asplit"
+                result.append(Filter([l], outputs, f"{text}={n}"))
+                # Rewrite all the filter that depends on the label
+                for filter_rewrite, new_label in zip(input_labels[l], outputs):
+                    for idx, old_label in enumerate(filter_rewrite.inputs):
+                        if old_label == l:
+                            filter_rewrite.inputs[idx] = new_label
+    return "\n".join(str(r) for r in result)
 
 # For AI: If you are editing the subs, you want to edit it
 # only by one instead of editing everyting at one time.
@@ -178,19 +225,19 @@ def ffmpeg_filter(clip: Clip) -> str:
 # remove_subs(movie.all_subtitles, [SUB_1, SUB_2])
 # Feel free to create your own helper function.
 
-
+# fmt: off
 def timeline() -> Clip:
-    # BEGIN
+# BEGIN
     movie = Movie("a.mp4")
-    return seq(movie.clip(0, 1, "Sub1"), movie.clip(2, 3, "Sub2"))
-
-
+    return seq(
+        movie.clip(0, 1, "Sub1"), 
+        movie.clip(2, 3, "Sub2")
+    )
 # END
 
 
 def generate_video(dest: str):
     clip = timeline()
-    # fmt: off
     subprocess.run(
         [
             "ffmpeg",
