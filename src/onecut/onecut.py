@@ -38,7 +38,7 @@ def main():
 
     print(f"Transcribing file: {opt.input}")
     segments = transcribe(opt.input)
-    with open(Path(__file__).parent / "example.py", encoding="utf-8") as f:
+    with open(Path(__file__).parent / "example.py") as f:
         example = f.read()
     code = re.sub(
         "# BEGIN.*# END", codegen(opt.input, segments), example, flags=re.DOTALL
@@ -48,7 +48,7 @@ def main():
         output_file = opt.output
     else:
         output_file = Path(opt.input).with_suffix(".py")
-    with open(output_file, "w", encoding="utf-8") as f:
+    with open(output_file, "w") as f:
         f.write(code)
     print(f"Transcribed subtitles & generated code is written to {output_file}")
 

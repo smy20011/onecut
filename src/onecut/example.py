@@ -2,7 +2,7 @@ from abc import ABC, abstractclassmethod, abstractmethod
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import time, timedelta, datetime
-from typing import ClassVar, Sequence
+from typing import Callable, ClassVar, Sequence
 from argparse import ArgumentParser
 from pathlib import Path
 from itertools import groupby
@@ -56,20 +56,17 @@ class Clip(ABC):
         Clip.COUNTER += 1
 
     @property
-    @abstractmethod
     def len(self) -> float:
-        pass
+        return 0
 
     @property
-    @abstractmethod
     def subtitles(self) -> list[SubTitle]:
         """Return a list of subtitles respect to the start of the clip."""
-        pass
+        return []
 
     @property
-    @abstractmethod
     def filters(self) -> list[Filter]:
-        pass
+        return []
 
     @property
     def v(self) -> FilterLabel:
@@ -83,9 +80,37 @@ class Clip(ABC):
     def deps(self) -> Sequence['Clip']:
         return []
 
+    def transform(self, vfilter="null", afilter="anull") -> 'Transform':
+        return Transform(self, vfilter, afilter)
+
     def __hash__(self) -> int:
         return hash(self.id)
 
+@dataclass
+class Transform(Clip):
+    source: Clip
+    vfilter: str
+    afilter: str
+
+    @property
+    def len(self) -> float:
+        return self.source.len
+
+    @property
+    def subtitles(self) -> list[SubTitle]:
+        """Return a list of subtitles respect to the start of the clip."""
+        return self.source.subtitles
+
+    @property
+    def filters(self) -> list[Filter]:
+        return [
+            Filter([self.source.a], [self.a], self.afilter),
+            Filter([self.source.v], [self.v], self.vfilter)
+        ]
+
+    @property
+    def deps(self) -> Sequence['Clip']:
+        return [self.source]
 
 @dataclass
 class Movie(Clip):
@@ -173,11 +198,24 @@ class Seq(Clip):
     def deps(self) -> Sequence['Clip']:
         return self.children
 
-
-
 def seq(*clips: Clip):
     c: Sequence[Clip] = clips
     return Seq(c)
+
+def combine(*movie_clips: MovieClip):
+    subtitles = []
+    start = movie_clips[0].start
+    for c in movie_clips:
+        for sub in c.subtitles:
+            subtitles.append(
+                SubTitle(c.start - start, c.end - start, sub.text)
+            )
+    return MovieClip(
+        movie=movie_clips[0].movie,
+        start=movie_clips[0].start,
+        end=movie_clips[-1].end,
+        _subtitles=subtitles
+    )
 
 
 def ffmpeg_filter(clip: Clip) -> str:
