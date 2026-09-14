@@ -2,12 +2,15 @@ from abc import ABC, abstractclassmethod, abstractmethod
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import time, timedelta, datetime
-from typing import Callable, ClassVar, Sequence
+from typing import Callable, ClassVar, Sequence, Union
 from argparse import ArgumentParser
 from pathlib import Path
 from itertools import groupby
 import subprocess
 import math
+from warnings import filters
+
+from numpy import isin
 
 
 def srt_timestamp(seconds: float) -> str:
@@ -83,6 +86,11 @@ class Clip(ABC):
     def transform(self, vfilter="null", afilter="anull") -> 'Transform':
         return Transform(self, vfilter, afilter)
 
+    def overlay(self, file_or_clip: Union[str, 'Clip'], vfilter="overlay") -> 'Overlay':
+        if isinstance(file_or_clip, str):
+            file_or_clip = Movie(file_or_clip, video_only=True)
+        return Overlay(self, file_or_clip, vfilter)
+
     def __hash__(self) -> int:
         return hash(self.id)
 
@@ -113,9 +121,39 @@ class Transform(Clip):
         return [self.source]
 
 @dataclass
+class BinaryFilter(Clip):
+    first: Clip
+    second: Clip
+
+    @property
+    def filters(self) -> list[Filter]:
+        return self.afilter() + self.vfilter()
+
+    @property
+    def deps(self) -> Sequence['Clip']:
+        return [self.first, self.second]
+
+    @property
+    def len(self) -> float:
+        return self.first.len
+
+    @property
+    def subtitles(self) -> list[SubTitle]:
+        return self.first.subtitles
+
+    def afilter(self) -> list[Filter]:
+        return [Filter([self.first.a], [self.a], "anull")]
+
+    def vfilter(self) -> list[Filter]:
+        return [Filter([self.first.v], [self.v], "null")]
+
+
+@dataclass
 class Movie(Clip):
     filename: str
     length: float = 9999.0
+    video_only: bool = False
+    audio_only: bool = False
     _subtitles: list[SubTitle] = field(default_factory=list)
 
     @property
@@ -128,10 +166,13 @@ class Movie(Clip):
 
     @property
     def filters(self) -> list[Filter]:
-        return [
-            Filter([], [self.v], f"movie=filename={self.filename}"),
-            Filter([], [self.a], f"amovie=filename={self.filename}"),
-        ]
+        vfilter = Filter([], [self.v], f"movie=filename={self.filename}")
+        afilter = Filter([], [self.a], f"amovie=filename={self.filename}")
+        if self.video_only:
+            return [vfilter]
+        if self.audio_only:
+            return [afilter]
+        return [vfilter, afilter]
 
     def clip(
         self, start: float, end: float, subtitle: str | None = None
@@ -198,6 +239,15 @@ class Seq(Clip):
     def deps(self) -> Sequence['Clip']:
         return self.children
 
+@dataclass
+class Overlay(BinaryFilter):
+    overlay_opts: str = "overlay"
+
+    def vfilter(self) -> list[Filter]:
+        return [
+            Filter([self.first.v, self.second.v], [self.v], self.overlay_opts)
+        ]
+
 def seq(*clips: Clip):
     c: Sequence[Clip] = clips
     return Seq(c)
@@ -234,9 +284,12 @@ def ffmpeg_filter(clip: Clip) -> str:
     # We need to insert split node if a input label is
     # used more than twice.
     input_labels: dict[FilterLabel, list[Filter]] = defaultdict(list)
+    output_labels: dict[FilterLabel, list[Filter]] = defaultdict(list)
     for f in filters:
         for l in f.inputs:
             input_labels[l].append(f)
+        for l in f.outputs:
+            output_labels[l].append(f)
 
     result = []
     for f in filters:
@@ -257,12 +310,13 @@ def ffmpeg_filter(clip: Clip) -> str:
                             filter_rewrite.inputs[idx] = new_label
     return "\n".join(str(r) for r in result)
 
-# For AI: If you are editing the subs, you want to edit it
-# only by one instead of editing everyting at one time.
-# Use remove_subs to remove unnecessary subs, like
-# remove_subs(movie.all_subtitles, [SUB_1, SUB_2])
-# Feel free to create your own helper function.
+# For AI: The following timeline function contains ASR result from
+# llama model, you need to clean the script to fix the ASR errors.
 
+# If you are editing the subs, you want to edit it
+# only by one instead of editing everyting at one time.
+# Word-level timing are located in the .word.json file in the
+# same directory.
 # fmt: off
 def timeline() -> Clip:
 # BEGIN
