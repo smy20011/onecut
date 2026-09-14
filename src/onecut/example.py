@@ -252,7 +252,7 @@ def seq(*clips: Clip):
     c: Sequence[Clip] = clips
     return Seq(c)
 
-def combine(*movie_clips: MovieClip):
+def combine(*movie_clips: MovieClip, padding_end = 0.15):
     subtitles = []
     start = movie_clips[0].start
     for c in movie_clips:
@@ -263,7 +263,7 @@ def combine(*movie_clips: MovieClip):
     return MovieClip(
         movie=movie_clips[0].movie,
         start=movie_clips[0].start,
-        end=movie_clips[-1].end,
+        end=movie_clips[-1].end + padding_end,
         _subtitles=subtitles
     )
 
