@@ -6,7 +6,7 @@ import argparse
 
 
 def transcribe(
-    file, model_size="small", device="cpu", compute_type="int8"
+    file, model_size="medium", device="cpu", compute_type="int8"
 ) -> list[Segment]:
     model = WhisperModel(model_size, device=device, compute_type=compute_type)
     segments, info = model.transcribe(

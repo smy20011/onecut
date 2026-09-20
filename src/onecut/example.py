@@ -30,6 +30,7 @@ class SubTitle:
     end: float
     text: str
 
+
 @dataclass(frozen=True)
 class FilterLabel:
     filter_type: str
@@ -37,6 +38,7 @@ class FilterLabel:
 
     def __str__(self) -> str:
         return f"{self.filter_type}{self.id}"
+
 
 @dataclass
 class Filter:
@@ -48,6 +50,7 @@ class Filter:
         inputs = "".join([f"[{l}]" for l in self.inputs])
         outputs = "".join([f"[{l}]" for l in self.outputs])
         return f"{inputs}{self.text}{outputs};"
+
 
 @dataclass
 class Clip(ABC):
@@ -80,19 +83,20 @@ class Clip(ABC):
         return FilterLabel("a", self.id)
 
     @property
-    def deps(self) -> Sequence['Clip']:
+    def deps(self) -> Sequence["Clip"]:
         return []
 
-    def transform(self, vfilter="null", afilter="anull") -> 'Transform':
+    def transform(self, vfilter="null", afilter="anull") -> "Transform":
         return Transform(self, vfilter, afilter)
 
-    def overlay(self, file_or_clip: Union[str, 'Clip'], vfilter="overlay") -> 'Overlay':
+    def overlay(self, file_or_clip: Union[str, "Clip"], vfilter="overlay") -> "Overlay":
         if isinstance(file_or_clip, str):
             file_or_clip = Movie(file_or_clip, video_only=True)
         return Overlay(self, file_or_clip, vfilter)
 
     def __hash__(self) -> int:
         return hash(self.id)
+
 
 @dataclass
 class Transform(Clip):
@@ -113,12 +117,13 @@ class Transform(Clip):
     def filters(self) -> list[Filter]:
         return [
             Filter([self.source.a], [self.a], self.afilter),
-            Filter([self.source.v], [self.v], self.vfilter)
+            Filter([self.source.v], [self.v], self.vfilter),
         ]
 
     @property
-    def deps(self) -> Sequence['Clip']:
+    def deps(self) -> Sequence["Clip"]:
         return [self.source]
+
 
 @dataclass
 class BinaryFilter(Clip):
@@ -130,7 +135,7 @@ class BinaryFilter(Clip):
         return self.afilter() + self.vfilter()
 
     @property
-    def deps(self) -> Sequence['Clip']:
+    def deps(self) -> Sequence["Clip"]:
         return [self.first, self.second]
 
     @property
@@ -201,12 +206,20 @@ class MovieClip(Clip):
     @property
     def filters(self) -> list[Filter]:
         return [
-            Filter([self.movie.v], [self.v], f"trim={self.start:.2f}:{self.end:.2f},setpts=PTS-STARTPTS"),
-            Filter([self.movie.a], [self.a], f"atrim={self.start:.2f}:{self.end:.2f},asetpts=PTS-STARTPTS")
+            Filter(
+                [self.movie.v],
+                [self.v],
+                f"trim={self.start:.2f}:{self.end:.2f},setpts=PTS-STARTPTS",
+            ),
+            Filter(
+                [self.movie.a],
+                [self.a],
+                f"atrim={self.start:.2f}:{self.end:.2f},asetpts=PTS-STARTPTS",
+            ),
         ]
 
     @property
-    def deps(self) -> Sequence['Clip']:
+    def deps(self) -> Sequence["Clip"]:
         return [self.movie]
 
 
@@ -233,38 +246,39 @@ class Seq(Clip):
         inputs = []
         for c in self.children:
             inputs.extend([c.v, c.a])
-        return [Filter(inputs, [self.v, self.a], f"concat=n={len(self.children)}:v=1:a=1")]
+        return [
+            Filter(inputs, [self.v, self.a], f"concat=n={len(self.children)}:v=1:a=1")
+        ]
 
     @property
-    def deps(self) -> Sequence['Clip']:
+    def deps(self) -> Sequence["Clip"]:
         return self.children
+
 
 @dataclass
 class Overlay(BinaryFilter):
     overlay_opts: str = "overlay"
 
     def vfilter(self) -> list[Filter]:
-        return [
-            Filter([self.first.v, self.second.v], [self.v], self.overlay_opts)
-        ]
+        return [Filter([self.first.v, self.second.v], [self.v], self.overlay_opts)]
+
 
 def seq(*clips: Clip):
     c: Sequence[Clip] = clips
     return Seq(c)
 
-def combine(*movie_clips: MovieClip, padding_end = 0.15):
+
+def combine(*movie_clips: MovieClip, padding_end=0.15):
     subtitles = []
     start = movie_clips[0].start
     for c in movie_clips:
         for sub in c.subtitles:
-            subtitles.append(
-                SubTitle(c.start - start, c.end - start, sub.text)
-            )
+            subtitles.append(SubTitle(c.start - start, c.end - start, sub.text))
     return MovieClip(
         movie=movie_clips[0].movie,
         start=movie_clips[0].start,
         end=movie_clips[-1].end + padding_end,
-        _subtitles=subtitles
+        _subtitles=subtitles,
     )
 
 
@@ -272,6 +286,7 @@ def ffmpeg_filter(clip: Clip) -> str:
     filters: list[Filter] = []
 
     visited = set()
+
     def dfs_clips(clip: Clip):
         if clip.id in visited:
             return
@@ -279,6 +294,7 @@ def ffmpeg_filter(clip: Clip) -> str:
             dfs_clips(dep)
         filters.extend(clip.filters)
         visited.add(clip.id)
+
     dfs_clips(clip)
 
     # We need to insert split node if a input label is
@@ -298,8 +314,7 @@ def ffmpeg_filter(clip: Clip) -> str:
             n = len(input_labels[l])
             if n > 1:
                 outputs = [
-                    FilterLabel(f"split{idx}_{l.filter_type}", l.id)
-                    for idx in range(n)
+                    FilterLabel(f"split{idx}_{l.filter_type}", l.id) for idx in range(n)
                 ]
                 text = "split" if l.filter_type == "v" else "asplit"
                 result.append(Filter([l], outputs, f"{text}={n}"))
@@ -310,8 +325,10 @@ def ffmpeg_filter(clip: Clip) -> str:
                             filter_rewrite.inputs[idx] = new_label
     return "\n".join(str(r) for r in result)
 
+
 # For AI: The following timeline function contains ASR result from
 # llama model, you need to clean the script to fix the ASR errors.
+
 
 # If you are editing the subs, you want to edit it
 # only by one instead of editing everyting at one time.
@@ -382,6 +399,8 @@ def main():
     subtitle_parser.add_argument(
         "--output_file", help="Path of the output srt file.", default="render.srt"
     )
+    subtitle_parser.set_defaults(func=generate_subtitle)
+
     sub_parsers.add_parser(
         "print_filter", description="Only print out fitlers"
     ).set_defaults(func=print_filters)

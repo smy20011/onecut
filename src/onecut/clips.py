@@ -1,0 +1,236 @@
+from __future__ import annotations
+
+from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
+from typing import Self, Any, Callable
+from uuid import UUID, uuid4
+from networkx import DiGraph
+from enum import StrEnum
+
+from networkx.algorithms.flow.maxflow import default_flow_func
+from numpy import clip
+
+
+@dataclass(frozen=True)
+class LabelNode:
+    node_id: str
+    cap: Cap
+
+
+@dataclass(frozen=True)
+class FilterNode:
+    node_id: str
+    filter_str: str
+    filter_id: str = ""
+
+
+GraphNode = LabelNode | FilterNode
+IRGraph = DiGraph[GraphNode]
+
+
+@dataclass
+class SubGraph:
+    graph: IRGraph = field(default_factory=IRGraph)
+    outputs: list[LabelNode] = field(default_factory=list)
+
+    def add_chain(self, *nodes: GraphNode) -> LabelNode:
+        for f, t in zip(nodes, nodes[1:]):
+            self.graph.add_edge(f, t)
+        assert isinstance(nodes[-1], LabelNode), (
+            "Last one in the chain must be label node"
+        )
+        return nodes[-1]
+
+    def get(self, cap: Cap) -> LabelNode:
+        for node in self.outputs:
+            if node.cap == cap:
+                return node
+        raise ValueError(f"Cannot find cap: {cap}")
+
+    def has(self, cap: Cap) -> bool:
+        for node in self.outputs:
+            if node.cap == cap:
+                return True
+        return False
+
+
+class Cap(StrEnum):
+    AUDIO = "audio"
+    VIDEO = "video"
+
+
+class Clip(ABC):
+    def as_node(self, id: str | None = None) -> Node[Self]:
+        return Node(id or str(uuid4()), self)
+
+    @abstractmethod
+    def len(self) -> float:
+        pass
+
+    @abstractmethod
+    def caps(self) -> set[Cap]:
+        pass
+
+    @abstractmethod
+    def deps(self) -> list[Node]:
+        pass
+
+    @abstractmethod
+    def filter_graph(self, id: str, inputs: list[SubGraph]) -> SubGraph:
+        pass
+
+    def subs(self) -> list[Subtitle]:
+        return []
+
+
+@dataclass
+class Node[T: Clip]:
+    id: str
+    value: T
+
+    def len(self) -> float:
+        return self.value.len()
+
+    def caps(self) -> set[Cap]:
+        return self.value.caps()
+
+    def deps(self) -> list[Node]:
+        return self.value.deps()
+
+    def subs(self) -> list[Subtitle]:
+        return self.value.subs()
+
+    def filter_graph(self, id: str, inputs: list[SubGraph]) -> SubGraph:
+        return self.value.filter_graph(id, inputs)
+
+    def filter(self, cap: Cap, filter_str: str) -> Node[Filter[T]]:
+        return Filter(self, cap, filter_str).as_node()
+
+    def sub(self, start: float, end: float, subtitle: str) -> Node[SubClip]:
+        return SubClip(self, start, end, [Subtitle(0, end - start, subtitle)]).as_node()
+
+
+@dataclass
+class Filter[T: Clip](Clip):
+    source: Node[T]
+    cap: Cap
+    filter_str: str
+
+    def len(self) -> float:
+        return self.source.value.len()
+
+    def caps(self) -> set[Cap]:
+        return self.source.value.caps()
+
+    def deps(self) -> list[Node]:
+        return [self.source]
+
+    def subs(self):
+        return self.source.subs()
+
+    def filter_graph(self, id: str, inputs: list[SubGraph]) -> SubGraph:
+        return filter_subgraph(inputs[0], id, {self.cap: self.filter_str})
+
+
+def filter_subgraph(input: SubGraph, id: str, filter_map: dict[Cap, str]) -> SubGraph:
+    r = SubGraph()
+    for output in input.outputs:
+        if output.cap in filter_map:
+            r.outputs.append(
+                r.add_chain(
+                    output,
+                    FilterNode(id, filter_map[output.cap]),
+                    LabelNode(id, output.cap),
+                )
+            )
+        else:
+            r.outputs.append(output)
+    return r
+
+
+@dataclass
+class Movie(Clip):
+    source: str
+    _len: float
+    _caps: set[Cap]
+
+    def len(self) -> float:
+        return self._len
+
+    def caps(self) -> set[Cap]:
+        return self._caps
+
+    def deps(self) -> list[Node]:
+        return []
+
+    def filter_graph(self, id: str, inputs: list[SubGraph]) -> SubGraph:
+        result = SubGraph()
+        if Cap.VIDEO in self.caps():
+            result.outputs.append(
+                result.add_chain(
+                    FilterNode(id, f"movie={self.source}"), LabelNode(id, Cap.VIDEO)
+                )
+            )
+
+        if Cap.AUDIO in self.caps():
+            result.outputs.append(
+                result.add_chain(
+                    FilterNode(id, f"amovie={self.source}"), LabelNode(id, Cap.AUDIO)
+                )
+            )
+        return result
+
+
+@dataclass
+class Subtitle:
+    start: float
+    end: float
+    text: str
+
+
+@dataclass
+class SubClip[T: Clip](Clip):
+    """A clip with subtitle data."""
+
+    source: Node[T]
+    start: float
+    end: float
+    subtitles: list[Subtitle] = field(default_factory=list)
+
+    def len(self) -> float:
+        return self.end - self.start
+
+    def caps(self) -> set[Cap]:
+        return self.source.caps()
+
+    def deps(self) -> list[Node]:
+        return [self.source]
+
+    def filter_graph(self, id: str, inputs: list[SubGraph]) -> SubGraph:
+        return filter_subgraph(
+            inputs[0],
+            id,
+            {
+                Cap.VIDEO: f"trim={self.start}:{self.end},setpts=PTS-STARTPTS",
+                Cap.AUDIO: f"atrim={self.start}:{self.end},asetpts=PTS-STARTPTS",
+            },
+        )
+
+    def subs(self) -> list[Subtitle]:
+        return self.subtitles
+
+    def combine(*clips: SubClip) -> SubClip:
+        """Combine all small clips together without jump cut"""
+        subtitles = []
+        first = clips[0]
+        # make sure all the clips are sorted and have same source
+        for f, t in zip(clips, clips[1:]):
+            assert t.source.id == first.source.id
+            assert f.start <= f.end <= t.start <= t.end
+
+        for c in clips:
+            delta = c.start - first.start
+            for sub in c.subtitles:
+                subtitles.append(Subtitle(sub.start + delta, sub.end + delta, sub.text))
+
+        return SubClip(first.source, clips[0].start, clips[-1].end, subtitles)

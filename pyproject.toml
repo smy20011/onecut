@@ -9,6 +9,7 @@ authors = [
 requires-python = ">=3.13"
 dependencies = [
     "faster-whisper>=1.2.1",
+    "networkx>=3.7",
 ]
 
 [project.scripts]
