@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from functools import cached_property
 from typing import Self, Any, Callable
 from uuid import UUID, uuid4
 from networkx import DiGraph
@@ -60,8 +61,10 @@ class Cap(StrEnum):
 
 
 class Clip(ABC):
-    def as_node(self, id: str | None = None) -> Node[Self]:
-        return Node(id or str(uuid4()), self)
+
+    @cached_property
+    def id(self) -> str:
+        return str(uuid4())
 
     @abstractmethod
     def len(self) -> float:
@@ -72,64 +75,46 @@ class Clip(ABC):
         pass
 
     @abstractmethod
-    def deps(self) -> list[Node]:
+    def deps(self) -> list[Clip]:
         pass
 
     @abstractmethod
-    def filter_graph(self, id: str, inputs: list[SubGraph]) -> SubGraph:
+    def filter_graph(self, inputs: list[SubGraph]) -> SubGraph:
         pass
 
     def subs(self) -> list[Subtitle]:
         return []
 
+    def filter(self, cap: Cap, filter_str: str) -> Filter[Self]:
+        return Filter(self, cap, filter_str)
 
-@dataclass
-class Node[T: Clip]:
-    id: str
-    value: T
-
-    def len(self) -> float:
-        return self.value.len()
-
-    def caps(self) -> set[Cap]:
-        return self.value.caps()
-
-    def deps(self) -> list[Node]:
-        return self.value.deps()
-
-    def subs(self) -> list[Subtitle]:
-        return self.value.subs()
-
-    def filter_graph(self, id: str, inputs: list[SubGraph]) -> SubGraph:
-        return self.value.filter_graph(id, inputs)
-
-    def filter(self, cap: Cap, filter_str: str) -> Node[Filter[T]]:
-        return Filter(self, cap, filter_str).as_node()
-
-    def sub(self, start: float, end: float, subtitle: str) -> Node[SubClip]:
-        return SubClip(self, start, end, [Subtitle(0, end - start, subtitle)]).as_node()
+    def sub(self, start: float, end: float, subtitle: str | None = None) -> SubClip:
+        if subtitle:
+            return SubClip(self, start, end, [Subtitle(0, end - start, subtitle)])
+        else:
+            return SubClip(self, start, end, [])
 
 
 @dataclass
 class Filter[T: Clip](Clip):
-    source: Node[T]
+    source: T
     cap: Cap
     filter_str: str
 
     def len(self) -> float:
-        return self.source.value.len()
+        return self.source.len()
 
     def caps(self) -> set[Cap]:
-        return self.source.value.caps()
+        return self.source.caps()
 
-    def deps(self) -> list[Node]:
+    def deps(self) -> list[Clip]:
         return [self.source]
 
     def subs(self):
         return self.source.subs()
 
-    def filter_graph(self, id: str, inputs: list[SubGraph]) -> SubGraph:
-        return filter_subgraph(inputs[0], id, {self.cap: self.filter_str})
+    def filter_graph(self, inputs: list[SubGraph]) -> SubGraph:
+        return filter_subgraph(inputs[0], self.id, {self.cap: self.filter_str})
 
 
 def filter_subgraph(input: SubGraph, id: str, filter_map: dict[Cap, str]) -> SubGraph:
@@ -160,22 +145,22 @@ class Movie(Clip):
     def caps(self) -> set[Cap]:
         return self._caps
 
-    def deps(self) -> list[Node]:
+    def deps(self) -> list[Clip]:
         return []
 
-    def filter_graph(self, id: str, inputs: list[SubGraph]) -> SubGraph:
+    def filter_graph(self, inputs: list[SubGraph]) -> SubGraph:
         result = SubGraph()
         if Cap.VIDEO in self.caps():
             result.outputs.append(
                 result.add_chain(
-                    FilterNode(id, f"movie={self.source}"), LabelNode(id, Cap.VIDEO)
+                    FilterNode(self.id, f"movie={self.source}"), LabelNode(self.id, Cap.VIDEO)
                 )
             )
 
         if Cap.AUDIO in self.caps():
             result.outputs.append(
                 result.add_chain(
-                    FilterNode(id, f"amovie={self.source}"), LabelNode(id, Cap.AUDIO)
+                    FilterNode(self.id, f"amovie={self.source}"), LabelNode(self.id, Cap.AUDIO)
                 )
             )
         return result
@@ -192,7 +177,7 @@ class Subtitle:
 class SubClip[T: Clip](Clip):
     """A clip with subtitle data."""
 
-    source: Node[T]
+    source: T
     start: float
     end: float
     subtitles: list[Subtitle] = field(default_factory=list)
@@ -203,13 +188,13 @@ class SubClip[T: Clip](Clip):
     def caps(self) -> set[Cap]:
         return self.source.caps()
 
-    def deps(self) -> list[Node]:
+    def deps(self) -> list[Clip]:
         return [self.source]
 
-    def filter_graph(self, id: str, inputs: list[SubGraph]) -> SubGraph:
+    def filter_graph(self, inputs: list[SubGraph]) -> SubGraph:
         return filter_subgraph(
             inputs[0],
-            id,
+            self.id,
             {
                 Cap.VIDEO: f"trim={self.start}:{self.end},setpts=PTS-STARTPTS",
                 Cap.AUDIO: f"atrim={self.start}:{self.end},asetpts=PTS-STARTPTS",
