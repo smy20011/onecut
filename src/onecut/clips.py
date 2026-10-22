@@ -61,7 +61,6 @@ class Cap(StrEnum):
 
 
 class Clip(ABC):
-
     @cached_property
     def id(self) -> str:
         return str(uuid4())
@@ -153,14 +152,16 @@ class Movie(Clip):
         if Cap.VIDEO in self.caps():
             result.outputs.append(
                 result.add_chain(
-                    FilterNode(self.id, f"movie={self.source}"), LabelNode(self.id, Cap.VIDEO)
+                    FilterNode(self.id, f"movie={self.source}"),
+                    LabelNode(self.id, Cap.VIDEO),
                 )
             )
 
         if Cap.AUDIO in self.caps():
             result.outputs.append(
                 result.add_chain(
-                    FilterNode(self.id, f"amovie={self.source}"), LabelNode(self.id, Cap.AUDIO)
+                    FilterNode(self.id, f"amovie={self.source}"),
+                    LabelNode(self.id, Cap.AUDIO),
                 )
             )
         return result
@@ -220,9 +221,14 @@ class SubClip[T: Clip](Clip):
 
         return SubClip(first.source, clips[0].start, clips[-1].end, subtitles)
 
+
 @dataclass
 class Concat(Clip):
     inputs: Sequence[Clip] = field(default_factory=list)
+
+    def __post_init__(self):
+        for input in self.inputs:
+            assert input.caps() == self.inputs[0].caps(), "All caps need to be same."
 
     def len(self) -> float:
         return sum([i.len() for i in self.inputs])
@@ -239,12 +245,62 @@ class Concat(Clip):
         result = SubGraph()
         filter_node = FilterNode(self.id, f"concat=n={len(self.inputs)}:v={v}:a={a}")
         result.graph.add_node(filter_node)
-        for idx, input in enumerate(inputs):
+        idx = 0
+        for input in inputs:
             for cap in [Cap.VIDEO, Cap.AUDIO]:
                 if cap in self.caps():
                     result.graph.add_edge(input.get(cap), filter_node, port=idx)
+                    idx += 1
         if v:
-            result.outputs.append(result.add_chain(filter_node, LabelNode(self.id, Cap.VIDEO)))
+            result.outputs.append(
+                result.add_chain(filter_node, LabelNode(self.id, Cap.VIDEO))
+            )
         if a:
-            result.outputs.append(result.add_chain(filter_node, LabelNode(self.id, Cap.AUDIO)))
+            result.outputs.append(
+                result.add_chain(filter_node, LabelNode(self.id, Cap.AUDIO))
+            )
         return result
+
+    def subs(self) -> list[Subtitle]:
+        subs = []
+        timestamp = 0
+        for input in self.inputs:
+            for s in input.subs():
+                subs.append(Subtitle(s.start + timestamp, s.end + timestamp, s.text))
+            timestamp += input.len()
+        return subs
+
+@dataclass
+class Overlay(Clip):
+    source: Clip
+    overlay: Clip
+    options: dict[str, str]
+
+    def __post_init__(self):
+        assert Cap.VIDEO in self.source.caps(), "Souce must have video"
+        assert Cap.VIDEO in self.overlay.caps(), "Overlay must have video"
+
+    def len(self) -> float:
+        return self.source.len()
+
+    def caps(self) -> set[Cap]:
+        return self.source.caps()
+
+    def deps(self) -> list[Clip]:
+        return [self.source, self.overlay]
+
+    def filter_graph(self, inputs: list[SubGraph]) -> SubGraph:
+        result = SubGraph()
+        params = ":".join([f"{k}={v}" for k, v in self.options.items()])
+        if params:
+            params = "=" + params
+        filter_node = FilterNode(self.id, f"overlay{params}")
+        result.graph.add_edge(inputs[0].get(Cap.VIDEO), filter_node, port=0)
+        result.graph.add_edge(inputs[1].get(Cap.VIDEO), filter_node, port=1)
+        result.outputs.append(result.add_chain(filter_node, LabelNode(self.id, Cap.VIDEO)))
+        if Cap.AUDIO in self.source.caps():
+            result.outputs.append(inputs[0].get(Cap.AUDIO))
+        return result
+
+    def subs(self) -> list[Subtitle]:
+        return self.source.subs()
