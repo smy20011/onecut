@@ -5,59 +5,12 @@ from dataclasses import dataclass, field
 from functools import cached_property
 from typing import Self, Any, Callable, Sequence
 from uuid import UUID, uuid4
-from networkx import DiGraph, MultiDiGraph
 from enum import StrEnum
 
 from networkx.algorithms.flow.maxflow import default_flow_func
 from numpy import clip
 
-
-@dataclass(frozen=True)
-class LabelNode:
-    node_id: str
-    cap: Cap
-
-
-@dataclass(frozen=True)
-class FilterNode:
-    node_id: str
-    filter_str: str
-    filter_id: str = ""
-
-
-GraphNode = LabelNode | FilterNode
-IRGraph = MultiDiGraph[GraphNode]
-
-
-@dataclass
-class SubGraph:
-    graph: IRGraph = field(default_factory=IRGraph)
-    outputs: list[LabelNode] = field(default_factory=list)
-
-    def add_chain(self, *nodes: GraphNode) -> LabelNode:
-        for f, t in zip(nodes, nodes[1:]):
-            self.graph.add_edge(f, t)
-        assert isinstance(nodes[-1], LabelNode), (
-            "Last one in the chain must be label node"
-        )
-        return nodes[-1]
-
-    def get(self, cap: Cap) -> LabelNode:
-        for node in self.outputs:
-            if node.cap == cap:
-                return node
-        raise ValueError(f"Cannot find cap: {cap}")
-
-    def has(self, cap: Cap) -> bool:
-        for node in self.outputs:
-            if node.cap == cap:
-                return True
-        return False
-
-
-class Cap(StrEnum):
-    AUDIO = "audio"
-    VIDEO = "video"
+from .filter_graph import SubGraph, FilterNode, LabelNode, Cap
 
 
 class Clip(ABC):
