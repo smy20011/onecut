@@ -3,9 +3,9 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from functools import cached_property
-from typing import Self, Any, Callable
+from typing import Self, Any, Callable, Sequence
 from uuid import UUID, uuid4
-from networkx import DiGraph
+from networkx import DiGraph, MultiDiGraph
 from enum import StrEnum
 
 from networkx.algorithms.flow.maxflow import default_flow_func
@@ -26,7 +26,7 @@ class FilterNode:
 
 
 GraphNode = LabelNode | FilterNode
-IRGraph = DiGraph[GraphNode]
+IRGraph = MultiDiGraph[GraphNode]
 
 
 @dataclass
@@ -219,3 +219,32 @@ class SubClip[T: Clip](Clip):
                 subtitles.append(Subtitle(sub.start + delta, sub.end + delta, sub.text))
 
         return SubClip(first.source, clips[0].start, clips[-1].end, subtitles)
+
+@dataclass
+class Concat(Clip):
+    inputs: Sequence[Clip] = field(default_factory=list)
+
+    def len(self) -> float:
+        return sum([i.len() for i in self.inputs])
+
+    def caps(self) -> set[Cap]:
+        return self.inputs[0].caps()
+
+    def deps(self) -> list[Clip]:
+        return list(self.inputs)
+
+    def filter_graph(self, inputs: list[SubGraph]) -> SubGraph:
+        v = int(Cap.VIDEO in self.caps())
+        a = int(Cap.AUDIO in self.caps())
+        result = SubGraph()
+        filter_node = FilterNode(self.id, f"concat=n={len(self.inputs)}:v={v}:a={a}")
+        result.graph.add_node(filter_node)
+        for idx, input in enumerate(inputs):
+            for cap in [Cap.VIDEO, Cap.AUDIO]:
+                if cap in self.caps():
+                    result.graph.add_edge(input.get(cap), filter_node, port=idx)
+        if v:
+            result.outputs.append(result.add_chain(filter_node, LabelNode(self.id, Cap.VIDEO)))
+        if a:
+            result.outputs.append(result.add_chain(filter_node, LabelNode(self.id, Cap.AUDIO)))
+        return result
