@@ -19,14 +19,14 @@ def transcribe(
 
 def codegen(filename: str, segments: list[Segment]):
     movie_len = max([s.end for s in segments], default=0.0)
-    code = f"    movie = Movie({repr(filename)}, {movie_len})\n"
-    code += "    return seq(\n"
+    code = f"    source = Movie({repr(filename)}, {movie_len})\n"
+    code += "    result = Concat([\n"
     for idx, segment in enumerate(segments):
         assert segment.words
         start_time = segment.words[0].start
         end_time = segment.words[-1].end
-        code += f"        movie.clip(start={start_time}, end={end_time}, subtitle={repr(segment.text.strip())}),\n"
-    code += "    )\n"
+        code += f"        source.sub(start={start_time}, end={end_time}, subtitle={repr(segment.text.strip())}),\n"
+    code += "    ])\n"
     return code
 
 

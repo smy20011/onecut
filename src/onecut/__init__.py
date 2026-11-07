@@ -1,4 +1,3 @@
-from .cli import main
-
 def main() -> None:
+    from .cli import main
     main()

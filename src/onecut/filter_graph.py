@@ -81,7 +81,7 @@ type RawGraphNode = RawFilterLabel | RawFilter
 type RawFilterGraph = MultiDiGraph[RawFilterLabel | RawFilter]
 
 # Transform clip subgraphs into a Low Level Raw Filter Graph
-def compile(root_clip: Clip) -> RawFilterGraph:
+def compile_to_filtergraph(root_clip: Clip) -> RawFilterGraph:
     clip_subgraph: dict[str, SubGraph] = {}
 
     def dfs_clips(clip: Clip) -> SubGraph:
@@ -132,7 +132,7 @@ def compile(root_clip: Clip) -> RawFilterGraph:
 
     return filter_graph
 
-def to_ffmpeg_filter(filter_graph: RawFilterGraph) -> str:
+def to_filter_str(filter_graph: RawFilterGraph) -> str:
     result = ""
     for node in nx.topological_sort(filter_graph):
         if isinstance(node, RawFilter):
@@ -148,3 +148,10 @@ def to_ffmpeg_filter(filter_graph: RawFilterGraph) -> str:
 
             result += f"{prev_str}{node.filter}{succ_str};\n"
     return result
+
+def compile(clip: Clip):
+    filter_graph = compile_to_filtergraph(clip)
+    output_nodes = [cast(RawFilterLabel, n) for n in filter_graph if filter_graph.out_degree(n) == 0]
+    video_node = [n for n in output_nodes if n.cap == Cap.VIDEO][0]
+    audio_node = [n for n in output_nodes if n.cap == Cap.AUDIO][0]
+    return to_filter_str(filter_graph), video_node.label, audio_node.label

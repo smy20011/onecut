@@ -8,7 +8,6 @@ from uuid import UUID, uuid4
 from enum import StrEnum
 
 from networkx.algorithms.flow.maxflow import default_flow_func
-from numpy import clip
 
 from .filter_graph import SubGraph, FilterNode, LabelNode, Cap
 
@@ -89,7 +88,7 @@ def filter_subgraph(input: SubGraph, id: str, filter_map: dict[Cap, str]) -> Sub
 class Movie(Clip):
     source: str
     _len: float
-    _caps: set[Cap]
+    _caps: set[Cap] = field(default_factory=lambda: {Cap.AUDIO, Cap.VIDEO})
 
     def len(self) -> float:
         return self._len
