@@ -1,7 +1,11 @@
+from __future__ import annotations
+
+from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from enum import StrEnum
 from functools import reduce
 from typing import TYPE_CHECKING, cast
+from uuid import uuid4
 from networkx import DiGraph, MultiDiGraph, reverse
 import networkx as nx
 
@@ -11,6 +15,11 @@ if TYPE_CHECKING:
 class Cap(StrEnum):
     AUDIO = "audio"
     VIDEO = "video"
+
+    def filter_prefix(self):
+        if self == Cap.AUDIO:
+            return "a"
+        return ""
 
 
 @dataclass(frozen=True)
@@ -25,12 +34,12 @@ class FilterNode:
     filter_str: str
 
 
-GraphNode = LabelNode | FilterNode
-IRGraph = MultiDiGraph[GraphNode]
+type GraphNode = LabelNode | FilterNode
+type IRGraph = MultiDiGraph[GraphNode]
 
 @dataclass
 class SubGraph:
-    graph: IRGraph = field(default_factory=IRGraph)
+    graph: IRGraph = field(default_factory=MultiDiGraph)
     outputs: list[LabelNode] = field(default_factory=list)
 
     def add_chain(self, *nodes: GraphNode) -> LabelNode:
@@ -66,9 +75,10 @@ class RawFilterLabel:
 @dataclass(frozen=True)
 class RawFilter:
     filter: str
+    id: str = field(default_factory=lambda: str(uuid4()))
 
-RawGraphNode = RawFilterLabel | RawFilter
-RawFilterGraph = MultiDiGraph[RawFilterLabel | RawFilter]
+type RawGraphNode = RawFilterLabel | RawFilter
+type RawFilterGraph = MultiDiGraph[RawFilterLabel | RawFilter]
 
 # Transform clip subgraphs into a Low Level Raw Filter Graph
 def compile(root_clip: Clip) -> RawFilterGraph:
@@ -92,35 +102,33 @@ def compile(root_clip: Clip) -> RawFilterGraph:
         reachable_nodes |= nx.ancestors(total_graph, node)
     reachable = total_graph.subgraph(reachable_nodes)
 
-    filter_graph = RawFilterGraph()
-    node_map: dict[GraphNode, RawGraphNode] = {}
-    # Create the filter graph node
-    for node in nx.topological_sort(reachable):
-        match node:
-            case LabelNode(id, cap):
-                node_map[node] = RawFilterLabel(f"{cap}_{len(node_map)}", cap=cap)
-            case FilterNode(_, filter):
-                node_map[node] = RawFilter(filter)
+    filter_graph: RawFilterGraph = MultiDiGraph()
+    node_map: dict[LabelNode, RawFilterLabel] = {}
+    for_consume: dict[LabelNode, deque[RawFilterLabel]] = defaultdict(deque)
+    # Create raw filter graph label nodes.
+    for node in list(reachable):
+        if isinstance(node, LabelNode):
+            u = RawFilterLabel(f"{node.cap}_{len(node_map)}", node.cap)
+            node_map[node] = u
+            filter_graph.add_node(u)
+            # Create splitted nodes
+            if reachable.out_degree(node) > 1:
+                split_filter = RawFilter(f"{node.cap.filter_prefix()}split={reachable.out_degree(node)}")
+                filter_graph.add_edge(u, split_filter)
+                for i in range(reachable.out_degree(node)):
+                    for_consume[node].append(RawFilterLabel(f"{u.label}_{i}", u.cap))
+                    filter_graph.add_edge(split_filter, for_consume[node][-1])
+            else:
+                for_consume[node].append(u)
 
-        filter_graph.add_node(node_map[node])
-        for prev in reachable.predecessors(node):
-            filter_graph.add_edge(node_map[prev], node_map[node])
-
-    for node in filter_graph:
-        if isinstance(node, RawFilterLabel) and filter_graph.out_degree(node) > 1:
-            split_nodes = []
-            out_edges = list(filter_graph.out_edges(node))
-            for i, (u, v) in enumerate(out_edges):
-                filter_graph.remove_edge(u, v)
-                new_node = RawFilterLabel(f"{node.label}_{i}", cap=node.cap)
-                split_nodes.append(new_node)
-                filter_graph.add_edge(new_node, v)
-
-            # Insert split node
-            split_filter = RawFilter(f"split={len(split_nodes)}") if node.label.startswith("v") else RawFilter(f"asplit={len(split_nodes)}") 
-            filter_graph.add_edge(node, split_filter)
-            for s in split_nodes:
-                filter_graph.add_edge(split_filter, s)
+    # Create all filter nodes
+    for f in nx.topological_sort(reachable):
+        if isinstance(f, FilterNode):
+            node = RawFilter(f.filter_str)
+            for u in reachable.predecessors(f):
+                filter_graph.add_edge(for_consume[cast(LabelNode, u)].popleft(), node)
+            for v in reachable.successors(f):
+                filter_graph.add_edge(node, node_map[cast(LabelNode, v)])
 
     return filter_graph
 

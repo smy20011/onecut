@@ -1,5 +1,4 @@
-from .onecut import main as cut_main
-
+from .cli import main
 
 def main() -> None:
-    cut_main()
+    main()

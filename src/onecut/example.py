@@ -1,4 +1,4 @@
-from clips import *
+from onecut.clips import *
 
 def timeline():
     movie = Movie("test.mov", 1000, {Cap.AUDIO, Cap.VIDEO})
