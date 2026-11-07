@@ -126,6 +126,30 @@ class Subtitle:
     end: float
     text: str
 
+    @staticmethod
+    def srt_timestamp(seconds: float) -> str:
+        total_ms = round(seconds * 1000)
+        ms = total_ms % 1000
+        total_sec = total_ms // 1000
+        sec = total_sec % 60
+        total_min = total_sec // 60
+        minutes = total_min % 60
+        hours = total_min // 60
+        return f"{hours:02}:{minutes:02}:{sec:02},{ms:03}"
+
+    @staticmethod
+    def gen_srt(subtitles: list['Subtitle']) -> str:
+        result = ""
+        for idx, subtitle in enumerate(subtitles, 1):
+            start = Subtitle.srt_timestamp(subtitle.start)
+            end = Subtitle.srt_timestamp(subtitle.end)
+            result += f"{idx}\n"
+            result += f"{start} --> {end}\n"
+            result += f"{subtitle.text}\n\n"
+        return result
+
+
+
 
 @dataclass
 class SubClip[T: Clip](Clip):
