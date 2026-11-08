@@ -3,13 +3,14 @@
 import xml.etree.ElementTree as ET
 from xml.sax.saxutils import escape
 from onecut.clips import *
+from yattag import Doc
 
 
 class MltXml:
     def __init__(self, clip, fps=30, **profile):
         self.clips = {}
         self.clip_id_to_id: dict[str, str] = {}
-        self.rendered = {}
+        self.rendered = set()
         self.xmls: list[str] = []
         self.root = clip
         self.fps = fps
@@ -35,11 +36,12 @@ class MltXml:
         """
         tree = ET.fromstring(result)
         ET.indent(tree)
-        return ET.tostring(tree, encoding="utf-8")
+        return ET.tostring(tree, encoding="unicode")
 
     def render_clip(self, clip: Clip):
         if clip.id in self.rendered:
             return
+        self.rendered.add(clip.id)
 
         for dep in clip.deps():
             self.render_clip(dep)
@@ -79,7 +81,7 @@ class MltXml:
     def render_tag_effect(self, item: Transition | Filter):
         tag = "filter" if isinstance(item, Filter) else "transition"
         result = ""
-        if item.start and item.end:
+        if item.start is not None and item.end is not None:
             result += (
                 f"""<{tag} in="{self.ts_in(item.start)}" out="{self.ts_out(item.end)}">"""
             )
@@ -109,11 +111,12 @@ class MltXml:
 
     def render_overlay(self, clip: Overlay):
         transtitions = "".join([self.render_tag_effect(t) for t in clip.transitions])
+        clip_len = self.ts_out(clip.len())
         return f"""
-              <tractor id="{self.name(clip)}" in="0" out="{self.ts_out(clip.len())}">
+              <tractor id="{self.name(clip)}">
                 <multitrack>
-                  <track producer="{self.name(clip._overlay)}"/>
-                  <track producer="{self.name(clip.source)}"/>
+                  <track producer="{self.name(clip.source)}" in="0" out="{clip_len}"/>
+                  <track producer="{self.name(clip._overlay)}" in="0" out="{clip_len}"/>
                 </multitrack>
                 {self.render_filter(clip)}
                 {transtitions}

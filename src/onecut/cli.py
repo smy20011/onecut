@@ -25,7 +25,7 @@ def codegen(filename: str, segments: list[Segment]):
         assert segment.words
         start_time = segment.words[0].start
         end_time = segment.words[-1].end
-        code += f"        source.subclip(start={start_time}, end={end_time}, subtitle={repr(segment.text.strip())}),\n"
+        code += f"        source.sub_clip(start={start_time}, end={end_time}, subtitle={repr(segment.text.strip())}),\n"
     code += "    ])\n"
     return code
 
