@@ -134,17 +134,20 @@ def compile_to_filtergraph(root_clip: Clip) -> RawFilterGraph:
 
 def to_filter_str(filter_graph: RawFilterGraph) -> str:
     result = ""
+    def get_name(label: RawFilterLabel):
+        return filter_graph.nodes[label].get("rename", label.label)
+
     for node in nx.topological_sort(filter_graph):
         if isinstance(node, RawFilter):
             prev_str = ""
             for prev in filter_graph.predecessors(node):
                 assert isinstance(prev, RawFilterLabel)
-                prev_str += f"[{prev.label}]"
+                prev_str += f"[{get_name(prev)}]"
 
             succ_str = ""
             for succ in filter_graph.successors(node):
                 assert isinstance(succ, RawFilterLabel)
-                succ_str += f"[{succ.label}]"
+                succ_str += f"[{get_name(succ)}]"
 
             result += f"{prev_str}{node.filter}{succ_str};\n"
     return result
@@ -153,5 +156,7 @@ def compile(clip: Clip):
     filter_graph = compile_to_filtergraph(clip)
     output_nodes = [cast(RawFilterLabel, n) for n in filter_graph if filter_graph.out_degree(n) == 0]
     video_node = [n for n in output_nodes if n.cap == Cap.VIDEO][0]
+    filter_graph.nodes[video_node]["rename"] = "out0"
     audio_node = [n for n in output_nodes if n.cap == Cap.AUDIO][0]
-    return to_filter_str(filter_graph), video_node.label, audio_node.label
+    filter_graph.nodes[audio_node]["rename"] = "out1"
+    return to_filter_str(filter_graph), "out0", "out1"

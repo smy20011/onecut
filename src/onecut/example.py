@@ -15,10 +15,10 @@ To edit the video, modify `timeline() -> Clip`.
 ## 1. Core API (`from onecut.clips import *`)
 
 - **`Cap`**: Stream capability enum (`Cap.VIDEO`, `Cap.AUDIO`).
-- **`Movie(source: str, _len: float, _caps: set[Cap])`**:
+- **`Source(source: str, _len: float, _caps: set[Cap])`**:
   Import a media file.
-  - Audio + Video: `Movie("a.mp4", 100.0, {Cap.AUDIO, Cap.VIDEO})`
-  - Video / Image only: `Movie("logo.png", 5.0, {Cap.VIDEO})`
+  - Audio + Video: `Source("a.mp4", 100.0, {Cap.AUDIO, Cap.VIDEO})`
+  - Video / Image only: `Source("logo.png", 5.0, {Cap.VIDEO})`
 - **`clip.sub(start: float, end: float, subtitle: str | None = None) -> SubClip`**:
   Slice `[start, end]` (in seconds) from any `Clip` and attach an optional subtitle.
 - **`SubClip.combine(*clips: SubClip) -> SubClip`**:
@@ -47,7 +47,7 @@ To edit the video, modify `timeline() -> Clip`.
 4. **Pre-process a source before slicing**:
    Filter the `Movie` first, then call `.sub(...)` on the filtered clip:
    ```python
-   raw = Movie("input.mp4", 600.0, {Cap.AUDIO, Cap.VIDEO})
+   raw = Source("input.mp4", 600.0, {Cap.AUDIO, Cap.VIDEO})
    source = raw.filter(Cap.VIDEO, "fps=30,scale=1920:1080")
    return Concat([
        source.sub(0.0, 5.0, "Intro"),

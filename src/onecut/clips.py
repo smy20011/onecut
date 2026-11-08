@@ -45,6 +45,8 @@ class Clip(ABC):
         else:
             return SubClip(self, start, end, [])
 
+    def overlay(self, overlay: Clip, **opts):
+        return Overlay(source=self, _overlay=overlay, options=opts)
 
 @dataclass
 class Filter[T: Clip](Clip):
@@ -85,7 +87,7 @@ def filter_subgraph(input: SubGraph, id: str, filter_map: dict[Cap, str]) -> Sub
 
 
 @dataclass
-class Movie(Clip):
+class Source(Clip):
     source: str
     _len: float
     _caps: set[Cap] = field(default_factory=lambda: {Cap.AUDIO, Cap.VIDEO})
@@ -249,12 +251,12 @@ class Concat(Clip):
 @dataclass
 class Overlay(Clip):
     source: Clip
-    overlay: Clip
+    _overlay: Clip
     options: dict[str, str]
 
     def __post_init__(self):
         assert Cap.VIDEO in self.source.caps(), "Souce must have video"
-        assert Cap.VIDEO in self.overlay.caps(), "Overlay must have video"
+        assert Cap.VIDEO in self._overlay.caps(), "Overlay must have video"
 
     def len(self) -> float:
         return self.source.len()
@@ -263,7 +265,7 @@ class Overlay(Clip):
         return self.source.caps()
 
     def deps(self) -> list[Clip]:
-        return [self.source, self.overlay]
+        return [self.source, self._overlay]
 
     def filter_graph(self, inputs: list[SubGraph]) -> SubGraph:
         result = SubGraph()
