@@ -3,7 +3,7 @@
 import xml.etree.ElementTree as ET
 from xml.sax.saxutils import escape
 from onecut.clips import *
-from yattag import Doc
+from yattag import Doc, indent
 
 
 class MltXml:
@@ -11,8 +11,10 @@ class MltXml:
         self.clips = {}
         self.clip_id_to_id: dict[str, str] = {}
         self.rendered = set()
-        self.xmls: list[str] = []
+        self.doc, self.tag, self.text = Doc().tagtext()
         self.root = clip
+        if profile.get("name", "").endswith("60"):
+            fps = 60
         self.fps = fps
         self.profile = profile
 
@@ -26,17 +28,10 @@ class MltXml:
         return dfs(clip)
 
     def render(self) -> str:
-        profile_args = " ".join([f'{k}="{escape(str(v))}"' for k, v in self.profile.items()])
-        self.render_clip(self.root)
-        result = f"""
-        <mlt>
-          <profile frame_rate_num="{self.fps}" frame_rate_den="1" {profile_args}/>
-          {"".join(self.xmls)}
-        </mlt>
-        """
-        tree = ET.fromstring(result)
-        ET.indent(tree)
-        return ET.tostring(tree, encoding="unicode")
+        with self.tag("mlt"):
+            self.doc.stag("profile", **self.profile)
+            self.render_clip(self.root)
+        return indent(self.doc.getvalue())
 
     def render_clip(self, clip: Clip):
         if clip.id in self.rendered:
@@ -46,82 +41,81 @@ class MltXml:
         for dep in clip.deps():
             self.render_clip(dep)
 
-        result = ""
         match clip:
             case Source():
-                result = self.render_source(clip)
+                self.render_source(clip)
             case SubClip():
-                result = self.render_subclip(clip)
+                self.render_subclip(clip)
             case Concat():
-                result = self.render_concat(clip)
+                self.render_concat(clip)
             case Overlay():
-                result = self.render_overlay(clip)
+                self.render_overlay(clip)
             case _:
                 raise ValueError(f"Unknown type {type(clip)}")
 
-        self.xmls.append(result)
-        return result
+    def producer(self, **kwargs):
+        return self.tag("producer", **kwargs)
 
-    def render_source(self, clip: Source) -> str:
-        return f"""
-            <producer id="{self.name(clip)}" in="0" out="{self.ts_in(clip.len())}">
-                <property name="resource">{clip.filename}</property>
-                {self.render_filter(clip)}
-            </producer>
-        """
+    def entry(self, **kwargs):
+        return self.doc.stag("entry", **kwargs)
 
-    def render_subclip(self, clip: SubClip) -> str:
-        return f"""
-             <playlist id="{self.name(clip)}">
-                 <entry producer="{self.name(clip.source)}" in="{self.ts_in(clip.start)}" out="{self.ts_out(clip.end)}" />
-                 {self.render_filter(clip)}
-             </playlist>
-        """
+    def playlist(self, **kwargs):
+        return self.tag("playlist", **kwargs)
+
+    def property(self, name, text):
+        with self.tag("property", name=name):
+            self.text(text)
+
+    def in_out(self, in_, out_):
+        if in_ is None or out_ is None:
+            return {}
+        return {"in": self.ts_in(in_), "out": self.ts_out(out_)}
+
+    def render_source(self, clip: Source):
+        with self.producer(id=self.name(clip), **self.in_out(0, clip.len())):
+            self.property("resource", clip.filename)
+            self.render_filter(clip)
+
+    def render_subclip(self, clip: SubClip):
+        with self.playlist(id=self.name(clip)):
+            self.entry(
+                producer=self.name(clip.source), **self.in_out(clip.start, clip.end)
+            )
+            self.render_filter(clip)
 
     def render_tag_effect(self, item: Transition | Filter):
         tag = "filter" if isinstance(item, Filter) else "transition"
-        result = ""
-        if item.start is not None and item.end is not None:
-            result += (
-                f"""<{tag} in="{self.ts_in(item.start)}" out="{self.ts_out(item.end)}">"""
-            )
-        else:
-            result += f"<{tag}>"
-        result += f"""<property name="mlt_service">{item.name}</property>"""
-        for k, v in item.args.items():
-            result += f"""
-                <property name="{k}">{escape(v)}</property>
-            """
-        result += f"</{tag}>"
-        return result
+        with self.tag(tag, **self.in_out(item.start, item.end)):
+            self.property("mlt_service", item.name)
+            for k, v in item.args.items():
+                self.property(k, v)
 
-    def render_filter(self, clip: Clip) -> str:
-        return "".join([self.render_tag_effect(f) for f in clip.filters])
+    def render_filter(self, clip: Clip):
+        for f in clip.filters:
+            self.render_tag_effect(f)
 
     def render_concat(self, clip: Concat):
-        producers = ""
-        for dep in clip.deps():
-            producers += f'<entry producer="{self.name(dep)}" />'
-        return f"""
-             <playlist id="{self.name(clip)}">
-             {producers}
-             {self.render_filter(clip)}
-             </playlist>
-        """
+        with self.playlist(id=self.name(clip)):
+            for dep in clip.deps():
+                self.doc.stag("entry", producer=self.name(dep))
+            self.render_filter(clip)
 
     def render_overlay(self, clip: Overlay):
-        transtitions = "".join([self.render_tag_effect(t) for t in clip.transitions])
-        clip_len = self.ts_out(clip.len())
-        return f"""
-              <tractor id="{self.name(clip)}">
-                <multitrack>
-                  <track producer="{self.name(clip.source)}" in="0" out="{clip_len}"/>
-                  <track producer="{self.name(clip._overlay)}" in="0" out="{clip_len}"/>
-                </multitrack>
-                {self.render_filter(clip)}
-                {transtitions}
-              </tractor>
-            """
+        with self.tag("tractor", id=self.name(clip)):
+            with self.tag("multitrack"):
+                self.doc.stag(
+                    "track",
+                    producer=self.name(clip.source),
+                    **self.in_out(0, clip.len()),
+                )
+                self.doc.stag(
+                    "track",
+                    producer=self.name(clip._overlay),
+                    **self.in_out(0, clip.len()),
+                )
+            self.render_filter(clip)
+            for t in clip.transitions:
+                self.render_tag_effect(t)
 
     def ts_in(self, time: float) -> int:
         return round(self.fps * time)

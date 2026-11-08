@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from functools import cached_property
 from typing import Self, Any, Callable, Sequence
 from uuid import UUID, uuid4
+import tempfile
 
 
 @dataclass(frozen=True)
@@ -13,6 +14,26 @@ class Filter:
     start: float | None = None
     end: float | None = None
     args: dict[str, str] = field(default_factory=dict)
+
+    @staticmethod
+    def subtitle(
+        clip: Clip,
+        font="Source Han Sans CN",
+        font_size=28,
+        primary_color="&H00E8E8E8",
+        outline_color="&H00000000",
+        border_style="1",
+        outline=1.8,
+        margin_v=38,
+    ):
+        style = f"FontName={font},FontSize={font_size},PrimaryColour={primary_color},OutlineColour={outline_color},BorderStyle={border_style},Outline={outline},MarginV={margin_v}"
+        subs = Subtitle.gen_srt(clip.subs())
+        with tempfile.NamedTemporaryFile("w", prefix="subtitle", delete=False) as f:
+            f.write(subs)
+        return Filter(
+            name="avfilter.subtitles",
+            args={"av.filename": f.name, "position": "filter", "av.force_style": style},
+        )
 
 
 @dataclass(frozen=True)
@@ -168,7 +189,9 @@ class Overlay(Clip):
     DEFAULT_TRANSITION = Transition("affine", args={"a_track": "0", "b_track": "1"})
     source: Clip
     _overlay: Clip
-    transitions: list[Transition] = field(default_factory=lambda: [Overlay.DEFAULT_TRANSITION])
+    transitions: list[Transition] = field(
+        default_factory=lambda: [Overlay.DEFAULT_TRANSITION]
+    )
 
     def len(self) -> float:
         return self.source.len()
