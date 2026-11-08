@@ -1,6 +1,7 @@
 """Render MLT XML from Clips"""
 
 import xml.etree.ElementTree as ET
+from xml.sax.saxutils import escape
 from onecut.clips import *
 
 
@@ -8,7 +9,8 @@ class MltXml:
     def __init__(self, clip, fps=30, **profile):
         self.clips = {}
         self.clip_id_to_id: dict[str, str] = {}
-        self.clip_id_to_xml: dict[str, str] = {}
+        self.rendered = {}
+        self.xmls: list[str] = []
         self.root = clip
         self.fps = fps
         self.profile = profile
@@ -23,20 +25,21 @@ class MltXml:
         return dfs(clip)
 
     def render(self) -> str:
-        profile_args = " ".join([f'{k}="{v}"' for k, v in self.profile.items()])
+        profile_args = " ".join([f'{k}="{escape(str(v))}"' for k, v in self.profile.items()])
+        self.render_clip(self.root)
         result = f"""
         <mlt>
           <profile frame_rate_num="{self.fps}" frame_rate_den="1" {profile_args}/>
-          {self.render_clip(self.root)}
+          {"".join(self.xmls)}
         </mlt>
         """
         tree = ET.fromstring(result)
         ET.indent(tree)
         return ET.tostring(tree, encoding="utf-8")
 
-    def render_clip(self, clip: Clip) -> str:
-        if clip.id in self.clip_id_to_xml:
-            return self.clip_id_to_xml[clip.id]
+    def render_clip(self, clip: Clip):
+        if clip.id in self.rendered:
+            return
 
         for dep in clip.deps():
             self.render_clip(dep)
@@ -54,12 +57,12 @@ class MltXml:
             case _:
                 raise ValueError(f"Unknown type {type(clip)}")
 
-        self.clip_id_to_xml[clip.id] = result
+        self.xmls.append(result)
         return result
 
     def render_source(self, clip: Source) -> str:
         return f"""
-            <producer id="{self.name(clip)}">
+            <producer id="{self.name(clip)}" in="0" out="{self.ts_in(clip.len())}">
                 <property name="resource">{clip.filename}</property>
                 {self.render_filter(clip)}
             </producer>
@@ -68,24 +71,24 @@ class MltXml:
     def render_subclip(self, clip: SubClip) -> str:
         return f"""
              <playlist id="{self.name(clip)}">
-                 <entry producer="{self.name(clip.source)}" in="{self.ts(clip.start)}" out="{self.ts(clip.end)}" />
+                 <entry producer="{self.name(clip.source)}" in="{self.ts_in(clip.start)}" out="{self.ts_out(clip.end)}" />
                  {self.render_filter(clip)}
-             </producer>
+             </playlist>
         """
 
-    def render_tag_effect(self, item: Transtition | Filter):
+    def render_tag_effect(self, item: Transition | Filter):
         tag = "filter" if isinstance(item, Filter) else "transition"
         result = ""
         if item.start and item.end:
             result += (
-                f"""<{tag} in="{self.ts(item.start)}" out="{self.ts(item.end)}">"""
+                f"""<{tag} in="{self.ts_in(item.start)}" out="{self.ts_out(item.end)}">"""
             )
         else:
             result += f"<{tag}>"
         result += f"""<property name="mlt_service">{item.name}</property>"""
         for k, v in item.args.items():
             result += f"""
-                <property name="{k}">{v}</property>
+                <property name="{k}">{escape(v)}</property>
             """
         result += f"</{tag}>"
         return result
@@ -101,13 +104,13 @@ class MltXml:
              <playlist id="{self.name(clip)}">
              {producers}
              {self.render_filter(clip)}
-             </producer>
+             </playlist>
         """
 
     def render_overlay(self, clip: Overlay):
         transtitions = "".join([self.render_tag_effect(t) for t in clip.transitions])
         return f"""
-              <tractor id="{self.name(clip)}">
+              <tractor id="{self.name(clip)}" in="0" out="{self.ts_out(clip.len())}">
                 <multitrack>
                   <track producer="{self.name(clip._overlay)}"/>
                   <track producer="{self.name(clip.source)}"/>
@@ -117,8 +120,11 @@ class MltXml:
               </tractor>
             """
 
-    def ts(self, time: float) -> int:
+    def ts_in(self, time: float) -> int:
         return round(self.fps * time)
+
+    def ts_out(self, time: float) -> int:
+        return round(self.fps * time) - 1
 
     def name(self, clip: Clip):
         if clip.id in self.clip_id_to_id:

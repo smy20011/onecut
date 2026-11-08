@@ -83,7 +83,7 @@ if __name__ == "__main__":
     timeline_clip = timeline()
 
     def write_mlt_file(dest: str):
-        mlt = MltXml(timeline_clip)
+        mlt = MltXml(timeline_clip, name="atsc_720p_30")
         with open(dest, "w") as f:
             f.write(mlt.render())
 

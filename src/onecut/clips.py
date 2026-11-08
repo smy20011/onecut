@@ -16,10 +16,10 @@ class Filter:
 
 
 @dataclass(frozen=True)
-class Transtition:
+class Transition:
     name: str
-    start: float
-    end: float
+    start: float | None
+    end: float | None
     args: dict[str, str] = field(default_factory=dict)
 
 
@@ -165,12 +165,20 @@ class Concat(Clip):
 
 @dataclass
 class Overlay(Clip):
+    DEFAULT_TRANSITION = Transition("affine", None, None, {"a_track": "0", "b_track": "1"})
     source: Clip
     _overlay: Clip
-    transitions: list[Transtition] = field(default_factory=list)
+    transitions: list[Transition] = field(default_factory=lambda: [Overlay.DEFAULT_TRANSITION])
 
     def len(self) -> float:
         return self.source.len()
 
+    def subs(self) -> list[Subtitle]:
+        return self.source.subs()
+
     def deps(self) -> list[Clip]:
         return [self.source, self._overlay]
+
+    def transition(self, transition: Transition):
+        self.transitions.append(transition)
+        return self
