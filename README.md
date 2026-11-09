@@ -13,24 +13,26 @@ uvx onecut@latest path/to/your/video.mp4
 The OneCut CLI will generate code like this. You can easily fix ASR errors by changing the text.
 
 ```python
-movie = Movie("a.txt", [])
-SUB_1 = sub("Sub1", 0, 1)
-SUB_2 = sub("Sub2", 1, 2)
-SUB_3 = sub("Sub3", 2, 3)
-
-FINAL_CLIPS = [SUB_1.to(SUB_3)]
+source = Source("test.mov", 1000)
+result = Concat(
+    [
+        source.sub_clip(1, 2, "Sub_A"),
+        source.sub_clip(2, 3, "Sub_B"),
+        source.sub_clip(3, 4, "Sub_C"),
+    ]
+)
 ```
 
 You can cut one section of your video (like SUB_2) by doing this.
 
 ```python
-FINAL_CLIPS = [SUB_1, SUB_3]
-```
-
-Or use the helper function to cut it, the function is super useful if you only want to remove a small portion of clips.
-
-```python
-FINAL_CLIPS = remove_subs(movie.all_subtitles, [SUB_2])
+result = Concat(
+    [
+        source.sub_clip(1, 2, "Sub_A"),
+        # Sub_B Removed
+        source.sub_clip(3, 4, "Sub_C"),
+    ]
+)
 ```
 
 After finishing cutting & fixing, just run `python {generated_file}.py` to generate the final video and subtitle(.srt) file.
@@ -40,6 +42,7 @@ After finishing cutting & fixing, just run `python {generated_file}.py` to gener
 
 1. Python 3
 2. FFmpeg
+3. Melt CLI
 
 The generated file is self-contained. It does not depend on the onecut package. The only dependency is ffmpeg.
 
